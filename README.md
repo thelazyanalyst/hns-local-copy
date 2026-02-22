@@ -45,7 +45,9 @@ With `hns`, you can:
 - **100% Local & Private**: Audio is processed entirely on your local machine. No data leaves your device
 - **Works Offline**: After the initial model download, no internet connection is required
 - **Multi-Language Support**: Transcribe in any language supported by Whisper
-- **Configurable**: Choose models and languages via environment variables
+- **Persistent Configuration**: Set your preferred models, languages, and save locations once with `hns config`
+- **Automatic Recording Storage**: Each recording is saved with a date/time-named WAV file and JSON metadata for easy retrieval and organization
+- **Configurable**: Choose models, languages, and save directories via CLI, environment variables, or config file
 - **Open Source** - MIT licensed, fully transparent
 
 ## Docs
@@ -65,6 +67,70 @@ With `hns`, you can:
 ## Usage
 
 ![use-cases-command-examples](img/hero-command-examples-dark.png)
+
+## Configuration
+
+hns now supports persistent configuration for your preferred settings. Set defaults once and they'll be reused for all future recordings.
+
+### View Current Configuration
+```bash
+hns config --show
+```
+
+This displays your effective configuration (merged from CLI options, environment variables, config file, and built-in defaults), plus the priority order for resolution.
+
+### Set Configuration
+```bash
+# Set default Whisper model
+hns config --model small
+
+# Set default language
+hns config --language es
+
+# Set directory for saving recordings
+hns config --save-dir ~/my-recordings
+
+# Combine multiple settings
+hns config --model base --language en --save-dir ~/hns-recordings
+```
+
+### Configuration File
+Settings are stored in `~/.config/hns/config.toml`:
+```toml
+model = "small"
+language = "es"
+save_dir = "/home/user/my-recordings"
+```
+
+### Priority Order
+Settings are resolved in this order (highest to lowest priority):
+1. **Command-line options** (`--model`, `--language`, etc.)
+2. **Environment variables** (`HNS_WHISPER_MODEL`, `HNS_LANG`)
+3. **Config file** (`~/.config/hns/config.toml`)
+4. **Built-in defaults** (model: `base`, language: auto-detect)
+
+## Recording Storage
+
+Each recording is automatically saved with:
+- **WAV file**: `{timestamp}_{text_slug}.wav` (e.g., `202401151030_hello_world_this_is_a.wav`)
+- **JSON metadata**: `{timestamp}_{text_slug}.json` containing:
+  - Transcribed text
+  - Model used
+  - Language
+  - Recording timestamp
+  - Audio duration (seconds)
+  - Transcription time (seconds)
+  - Reference to WAV file
+
+Recordings are saved to the configured directory (default: platform-specific location):
+- **Linux**: `~/.local/share/hns/recordings/`
+- **macOS**: `~/Library/Application Support/hns/recordings/`
+- **Windows**: `~/AppData/Roaming/hns/Recordings/`
+
+Change the save directory anytime with:
+```bash
+hns config --save-dir ~/path/to/your/recordings
+```
 
 ## Demo
 
