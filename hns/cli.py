@@ -69,14 +69,14 @@ def save_recording(
     save_dir: Path,
     recorded_at: datetime,
 ) -> None:
-    save_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = recorded_at.strftime("%Y%m%d%H%M")
     words = re.sub(r"[^a-z0-9 ]", "", text.lower()).split()
     slug = "_".join(words[:5]) if words else "no_speech"
-    stem = f"{timestamp}_{slug}"
+    folder_name = recorded_at.strftime("%Y_%m_%d") + f"_{slug}"
+    recording_dir = save_dir / folder_name
+    recording_dir.mkdir(parents=True, exist_ok=True)
 
-    wav_dest = save_dir / f"{stem}.wav"
-    json_dest = save_dir / f"{stem}.json"
+    wav_dest = recording_dir / f"{folder_name}.wav"
+    json_dest = recording_dir / f"{folder_name}.json"
 
     try:
         shutil.copy2(wav_source, wav_dest)
@@ -91,7 +91,7 @@ def save_recording(
             "recorded_at": recorded_at.isoformat(),
             "audio_duration_seconds": audio_duration,
             "transcription_time_seconds": transcription_time,
-            "wav_file": f"{stem}.wav",
+            "wav_file": f"{folder_name}.wav",
         }
         json_dest.write_text(json.dumps(metadata, indent=2))
     except Exception as e:
@@ -348,7 +348,22 @@ def copy_to_clipboard(text: str):
     console.print("✅ [bold green]Copied to clipboard![/bold green]")
 
 
-@click.group(invoke_without_command=True)
+@click.group(
+    invoke_without_command=True,
+    epilog="""
+\b
+Examples:
+  hns                              Record and transcribe using default settings
+  hns --model small                Use the small Whisper model
+  hns --language en                Force English transcription
+  hns --last                       Re-transcribe the last recorded audio
+  hns --model medium --language fr Record and transcribe in French
+  hns config --show                Show current configuration
+  hns config --model small         Set default model to 'small'
+  hns config --save-dir ~/notes    Save recordings to ~/notes
+  hns --list-models                List all available Whisper models
+""",
+)
 @click.pass_context
 @click.option("--sample-rate", default=16000, help="Sample rate for audio recording")
 @click.option("--channels", default=1, help="Number of audio channels")
