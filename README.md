@@ -21,9 +21,21 @@
 
 ---
 
+> **This is a fork of the excellent [primaprashant/hns](https://github.com/primaprashant/hns) project.** It extends the original with automatic local file saving — every recording is stored as a named WAV + JSON pair in its own dated folder, making it easy to build a personal voice knowledge base, review past transcriptions, and feed multiple recordings into AI agents or pipelines for multi-prompt knowledge storage and retrieval.
+
+---
+
 hns is a speech-to-text CLI tool to transcribe your voice from your microphone directly to clipboard. Integrate hns with Claude Code, Ollama, LLM, and more CLI tools for powerful workflows.
 
 `hns` transcribes your voice 100% locally using [faster-whisper](https://github.com/SYSTRAN/faster-whisper). The whisper model is downloaded automatically on first run and after that, `hns` can be used completely offline. After transcription, the text is displayed in the terminal (written to stdout) as well as automatically copied to your clipboard, ready to be pasted anywhere with `Ctrl+V` or `Cmd+V`.
+
+### What this fork adds
+
+- **Automatic local saving** — every recording is saved to its own `YYYY_MM_DD_words/` folder with a `.wav` audio file and `.json` transcript
+- **JSON metadata** — each transcript includes model, language, timestamps, and duration, ready for downstream processing
+- **Multi-voice knowledge storage** — build up a library of recordings over time and feed them into AI agents, RAG pipelines, or search tools
+- **Persistent configuration** — set your model, language, and save directory once with `hns config` instead of repeating flags
+- **GPU/CUDA support** — auto-detects your GPU and uses it for faster transcription (with `--device` override)
 
 With `hns`, you can:
 - [Drive AI coding agents like Claude Code, Codex CLI, and Cursor CLI with your voice](https://hns-cli.dev/docs/drive-coding-agents/)
