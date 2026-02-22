@@ -358,6 +358,130 @@ class WhisperTranscriber:
         console.print("  [dim]export HNS_LANG=<language-code>  # e.g., en, es, fr[/dim]")
 
 
+class ParakeetTranscriber:
+    VALID_MODELS = [
+        "nemo-parakeet-tdt-0.6b-v3",
+        "nemo-parakeet-tdt-0.6b-v2",
+        "nemo-parakeet-tdt-1.1b",
+        "nemo-parakeet-ctc-0.6b",
+        "nemo-parakeet-ctc-1.1b",
+    ]
+    DEFAULT_MODEL = "nemo-parakeet-tdt-0.6b-v3"
+    # Models that support multiple languages (v3+); others are English-only
+    MULTILINGUAL_MODELS = {"nemo-parakeet-tdt-0.6b-v3"}
+
+    def __init__(self, model_name: Optional[str] = None, language: Optional[str] = None, device: Optional[str] = None):
+        self.model_name = self._get_model_name(model_name)
+        self.language = language or os.environ.get("HNS_LANG")
+        self.device = self._resolve_device(device)
+        self.model = self._load_model()
+
+    def _get_model_name(self, model_name: Optional[str]) -> str:
+        model = model_name or os.environ.get("HNS_MODEL", self.DEFAULT_MODEL)
+        if model not in self.VALID_MODELS:
+            console.print(
+                f"⚠️ [bold yellow]Invalid Parakeet model '{model}', using '{self.DEFAULT_MODEL}' instead[/bold yellow]"
+            )
+            console.print(f"    [dim]Available models: {', '.join(self.VALID_MODELS)}[/dim]")
+            return self.DEFAULT_MODEL
+        return model
+
+    def _resolve_device(self, device: Optional[str]) -> str:
+        requested = device or os.environ.get("HNS_DEVICE", "auto")
+        if requested == "auto":
+            try:
+                import onnxruntime as ort
+
+                if "CUDAExecutionProvider" in ort.get_available_providers():
+                    console.print("🖥️  [dim]Using GPU (CUDA)[/dim]", end="\r")
+                    return "cuda"
+            except Exception:
+                pass
+            return "cpu"
+        return requested if requested in ("cpu", "cuda") else "cpu"
+
+    def _load_model(self):
+        try:
+            import onnx_asr
+        except ImportError:
+            raise RuntimeError(
+                "Parakeet backend requires onnx-asr. Install with:\n"
+                "  pip install 'hns[parakeet-cuda]'  (GPU)\n"
+                "  pip install 'hns[parakeet]'        (CPU)"
+            )
+        try:
+            providers = (
+                ["CUDAExecutionProvider", "CPUExecutionProvider"] if self.device == "cuda" else ["CPUExecutionProvider"]
+            )
+            return onnx_asr.load_model(self.model_name, providers=providers)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load Parakeet model '{self.model_name}': {e}")
+
+    def _get_audio_duration(self, audio_file_path: Union[Path, str]) -> Optional[float]:
+        try:
+            with wave.open(str(audio_file_path), "rb") as f:
+                return f.getnframes() / float(f.getframerate())
+        except Exception:
+            return None
+
+    def transcribe(self, audio_source: Union[Path, str], show_progress: bool = True) -> tuple:
+        try:
+            start_time = time.time()
+
+            if show_progress:
+                import queue as _queue
+
+                result_queue = _queue.Queue()
+                done = threading.Event()
+
+                def worker():
+                    try:
+                        result = self.model.recognize(str(audio_source))
+                        result_queue.put(("result", result))
+                    except Exception as e:
+                        result_queue.put(("error", e))
+                    finally:
+                        done.set()
+
+                t = threading.Thread(target=worker, daemon=True)
+                t.start()
+                while not done.is_set():
+                    elapsed = time.time() - start_time
+                    console.print(f"🔄 [bold blue]Transcribing ... {format_duration(elapsed)}[/bold blue]", end="\r")
+                    time.sleep(1)
+                console.print("")
+                kind, data = result_queue.get()
+                if kind == "error":
+                    raise data
+                text = data
+            else:
+                text = self.model.recognize(str(audio_source))
+
+            if isinstance(text, list):
+                text = " ".join(t for t in text if t)
+            text = text.strip() if isinstance(text, str) else ""
+
+            if not text:
+                raise ValueError("No speech detected in audio")
+
+            return text, time.time() - start_time
+        except Exception as e:
+            raise RuntimeError(f"Transcription failed: {e}")
+
+    @classmethod
+    def list_models(cls):
+        console.print("ℹ️ [bold cyan]Available Parakeet models:[/bold cyan]")
+        for model in cls.VALID_MODELS:
+            suffix = (
+                " [dim](multilingual — 25 European langs)[/dim]"
+                if model in cls.MULTILINGUAL_MODELS
+                else " [dim](English only)[/dim]"
+            )
+            console.print(f"  • [dim]{model}[/dim]{suffix}")
+        console.print("\n  Install: [dim]pip install 'hns[parakeet-cuda]'[/dim]  (GPU)")
+        console.print("           [dim]pip install 'hns[parakeet]'[/dim]        (CPU)")
+
+
 def copy_to_clipboard(text: str):
     pyperclip.copy(text)
     console.print("✅ [bold green]Copied to clipboard![/bold green]")
@@ -368,24 +492,28 @@ def copy_to_clipboard(text: str):
     epilog="""
 \b
 Examples:
-  hns                              Record and transcribe using default settings
-  hns --model small                Use the small Whisper model
-  hns --language en                Force English transcription
-  hns --last                       Re-transcribe the last recorded audio
-  hns --model medium --language fr Record and transcribe in French
-  hns --device cuda                Force GPU transcription
-  hns --device cpu                 Force CPU transcription
-  hns config --show                Show current configuration
-  hns config --model small         Set default model to 'small'
-  hns config --save-dir ~/notes    Save recordings to ~/notes
-  hns --list-models                List all available Whisper models
+  hns                                    Record using default settings (Whisper)
+  hns --backend parakeet                 Use Parakeet backend (faster, better WER)
+  hns --model small                      Use Whisper small model
+  hns --backend parakeet --model nemo-parakeet-tdt-1.1b  Use specific Parakeet model
+  hns --language en                      Force English transcription
+  hns --last                             Re-transcribe the last recorded audio
+  hns --model medium --language fr       Transcribe in French (Whisper)
+  hns --device cuda                      Force GPU transcription
+  hns --device cpu                       Force CPU transcription
+  hns --list-models                      List models for current backend
+  hns --backend parakeet --list-models   List available Parakeet models
+  hns config --show                      Show current configuration
+  hns config --model small               Set default model
+  hns config --backend parakeet          Set Parakeet as default backend
+  hns config --save-dir ~/notes          Set recordings save directory
 """,
 )
 @click.pass_context
 @click.option("--sample-rate", default=16000, help="Sample rate for audio recording")
 @click.option("--channels", default=1, help="Number of audio channels")
-@click.option("--list-models", is_flag=True, help="List available Whisper models and exit")
-@click.option("--model", help="Whisper model to use. Can also use HNS_WHISPER_MODEL env var")
+@click.option("--list-models", is_flag=True, help="List available models for selected backend and exit")
+@click.option("--model", help="Model to use. Defaults depend on backend (see --list-models)")
 @click.option("--language", help="Force language detection (e.g., en, es, fr). Can also use HNS_LANG env var")
 @click.option("--last", is_flag=True, help="Transcribe the last recorded audio file")
 @click.option(
@@ -393,6 +521,12 @@ Examples:
     type=click.Choice(["auto", "cpu", "cuda"]),
     default="auto",
     help="Device for transcription (default: auto-detect)",
+)
+@click.option(
+    "--backend",
+    type=click.Choice(["whisper", "parakeet"]),
+    default=None,
+    help="Transcription backend: whisper (default) or parakeet",
 )
 def main(
     ctx: click.Context,
@@ -403,19 +537,24 @@ def main(
     language: Optional[str],
     last: bool,
     device: str,
+    backend: Optional[str],
 ):
     """Record audio from microphone, transcribe it, and copy to clipboard."""
 
     if ctx.invoked_subcommand is not None:
         return
 
+    cfg = load_config()
+    resolved_backend = backend or os.environ.get("HNS_BACKEND") or cfg.get("backend") or "whisper"
+
     if list_models:
-        WhisperTranscriber.list_models()
+        if resolved_backend == "parakeet":
+            ParakeetTranscriber.list_models()
+        else:
+            WhisperTranscriber.list_models()
         return
 
     try:
-        cfg = load_config()
-        resolved_model = model or os.environ.get("HNS_WHISPER_MODEL") or cfg.get("model") or "base"
         resolved_language = language or os.environ.get("HNS_LANG") or cfg.get("language") or None
         raw_save_dir = cfg.get("save_dir")
         save_dir = Path(raw_save_dir).expanduser() if raw_save_dir else get_default_save_dir()
@@ -434,7 +573,15 @@ def main(
             recorder = AudioRecorder(sample_rate, channels)
             audio_file_path = recorder.record()
 
-        transcriber = WhisperTranscriber(model_name=resolved_model, language=resolved_language, device=device)
+        if resolved_backend == "parakeet":
+            resolved_model = (
+                model or os.environ.get("HNS_MODEL") or cfg.get("model") or ParakeetTranscriber.DEFAULT_MODEL
+            )
+            transcriber = ParakeetTranscriber(model_name=resolved_model, language=resolved_language, device=device)
+        else:
+            resolved_model = model or os.environ.get("HNS_WHISPER_MODEL") or cfg.get("model") or "base"
+            transcriber = WhisperTranscriber(model_name=resolved_model, language=resolved_language, device=device)
+
         audio_duration = transcriber._get_audio_duration(audio_file_path)
         transcription, transcription_time = transcriber.transcribe(audio_file_path, show_progress=True)
 
@@ -469,8 +616,9 @@ def main(
 
 def _show_config():
     cfg = load_config()
-    env_model = os.environ.get("HNS_WHISPER_MODEL")
+    env_model = os.environ.get("HNS_WHISPER_MODEL") or os.environ.get("HNS_MODEL")
     env_lang = os.environ.get("HNS_LANG")
+    env_backend = os.environ.get("HNS_BACKEND")
 
     config_file = Path.home() / ".config" / "hns" / "config.toml"
     console.print("[bold cyan]Current Configuration[/bold cyan]")
@@ -481,38 +629,44 @@ def _show_config():
         console.print(f"  Config file: {config_file} [dim](not yet created)[/dim]")
 
     console.print("\n[bold cyan]Settings (in priority order):[/bold cyan]")
-    console.print("  1. Command-line options (--model, --language, etc.)")
-    console.print("  2. Environment variables (HNS_WHISPER_MODEL, HNS_LANG)")
+    console.print("  1. Command-line options (--model, --language, --backend, etc.)")
+    console.print("  2. Environment variables (HNS_BACKEND, HNS_MODEL, HNS_LANG)")
     console.print(f"  3. Config file ({config_file})")
-    console.print("  4. Built-in defaults (model: base, language: auto-detect)")
+    console.print("  4. Built-in defaults (backend: whisper, model: base, language: auto-detect)")
 
-    resolved_model = os.environ.get("HNS_WHISPER_MODEL") or cfg.get("model") or "base"
-    resolved_language = os.environ.get("HNS_LANG") or cfg.get("language") or None
+    resolved_backend = env_backend or cfg.get("backend") or "whisper"
+    default_model = ParakeetTranscriber.DEFAULT_MODEL if resolved_backend == "parakeet" else "base"
+    resolved_model = env_model or cfg.get("model") or default_model
+    resolved_language = env_lang or cfg.get("language") or None
     raw_save_dir = cfg.get("save_dir")
     resolved_save_dir = Path(raw_save_dir).expanduser() if raw_save_dir else get_default_save_dir()
 
     console.print("\n[bold cyan]Effective configuration:[/bold cyan]")
+    console.print(f"  Backend: {resolved_backend}")
     console.print(f"  Model: {resolved_model}")
     console.print(f"  Language: {resolved_language or '(auto-detect)'}")
     console.print(f"  Save directory: {resolved_save_dir}")
 
-    if env_model or env_lang:
+    active_env = {
+        k: v for k, v in {"HNS_BACKEND": env_backend, "HNS_MODEL": env_model, "HNS_LANG": env_lang}.items() if v
+    }
+    if active_env:
         console.print("\n[bold cyan]Active environment variables:[/bold cyan]")
-        if env_model:
-            console.print(f"  HNS_WHISPER_MODEL={env_model}")
-        if env_lang:
-            console.print(f"  HNS_LANG={env_lang}")
+        for k, v in active_env.items():
+            console.print(f"  {k}={v}")
 
     if config_file.exists():
         console.print("\n[bold cyan]Config file contents:[/bold cyan]")
         console.print(config_file.read_text())
 
 
-def _write_config(model: Optional[str], language: Optional[str], save_dir: Optional[str]):
+def _write_config(backend: Optional[str], model: Optional[str], language: Optional[str], save_dir: Optional[str]):
     config_file = Path.home() / ".config" / "hns" / "config.toml"
     config_file.parent.mkdir(parents=True, exist_ok=True)
 
     cfg = load_config()
+    if backend is not None:
+        cfg["backend"] = backend
     if model is not None:
         cfg["model"] = model
     if language is not None:
@@ -521,6 +675,8 @@ def _write_config(model: Optional[str], language: Optional[str], save_dir: Optio
         cfg["save_dir"] = save_dir
 
     toml_lines = []
+    if "backend" in cfg:
+        toml_lines.append(f'backend = "{cfg["backend"]}"')
     if "model" in cfg:
         toml_lines.append(f'model = "{cfg["model"]}"')
     if "language" in cfg:
@@ -535,16 +691,19 @@ def _write_config(model: Optional[str], language: Optional[str], save_dir: Optio
 
 
 @main.command("config")
-@click.option("--model", help="Set the default Whisper model")
+@click.option("--backend", type=click.Choice(["whisper", "parakeet"]), help="Set the default transcription backend")
+@click.option("--model", help="Set the default model (depends on backend)")
 @click.option("--language", help="Set the default language code")
 @click.option("--save-dir", help="Set the directory for saving recordings")
 @click.option("--show", is_flag=True, help="Show current configuration")
-def config_cmd(model: Optional[str], language: Optional[str], save_dir: Optional[str], show: bool):
+def config_cmd(
+    backend: Optional[str], model: Optional[str], language: Optional[str], save_dir: Optional[str], show: bool
+):
     """Manage hns configuration."""
-    if show or (not model and not language and not save_dir):
+    if show or (not backend and not model and not language and not save_dir):
         _show_config()
     else:
-        _write_config(model, language, save_dir)
+        _write_config(backend, model, language, save_dir)
 
 
 if __name__ == "__main__":
