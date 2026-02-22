@@ -228,9 +228,10 @@ class WhisperTranscriber:
         "turbo",
     ]
 
-    def __init__(self, model_name: Optional[str] = None, language: Optional[str] = None):
+    def __init__(self, model_name: Optional[str] = None, language: Optional[str] = None, device: Optional[str] = None):
         self.model_name = self._get_model_name(model_name)
         self.language = language or os.environ.get("HNS_LANG")
+        self.device, self.compute_type = self._resolve_device(device)
         self.model = self._load_model()
 
     def _get_audio_duration(self, audio_file_path: Union[Path, str]) -> Optional[float]:
@@ -254,11 +255,25 @@ class WhisperTranscriber:
 
         return model
 
+    def _resolve_device(self, device: Optional[str]) -> tuple[str, str]:
+        import ctranslate2
+
+        requested = device or os.environ.get("HNS_DEVICE", "auto")
+        if requested == "auto":
+            cuda_types = ctranslate2.get_supported_compute_types("cuda")
+            if "float16" in cuda_types:
+                console.print("🖥️  [dim]Using GPU (CUDA)[/dim]", end="\r")
+                return "cuda", "float16"
+            return "cpu", "int8"
+        if requested == "cuda":
+            return "cuda", "float16"
+        return "cpu", "int8"
+
     def _load_model(self):
         from faster_whisper import WhisperModel
 
         try:
-            return WhisperModel(self.model_name, device="cpu", compute_type="int8")
+            return WhisperModel(self.model_name, device=self.device, compute_type=self.compute_type)
         except Exception as e:
             raise RuntimeError(f"Failed to load model: {e}")
 
@@ -358,6 +373,8 @@ Examples:
   hns --language en                Force English transcription
   hns --last                       Re-transcribe the last recorded audio
   hns --model medium --language fr Record and transcribe in French
+  hns --device cuda                Force GPU transcription
+  hns --device cpu                 Force CPU transcription
   hns config --show                Show current configuration
   hns config --model small         Set default model to 'small'
   hns config --save-dir ~/notes    Save recordings to ~/notes
@@ -371,6 +388,12 @@ Examples:
 @click.option("--model", help="Whisper model to use. Can also use HNS_WHISPER_MODEL env var")
 @click.option("--language", help="Force language detection (e.g., en, es, fr). Can also use HNS_LANG env var")
 @click.option("--last", is_flag=True, help="Transcribe the last recorded audio file")
+@click.option(
+    "--device",
+    type=click.Choice(["auto", "cpu", "cuda"]),
+    default="auto",
+    help="Device for transcription (default: auto-detect)",
+)
 def main(
     ctx: click.Context,
     sample_rate: int,
@@ -379,6 +402,7 @@ def main(
     model: Optional[str],
     language: Optional[str],
     last: bool,
+    device: str,
 ):
     """Record audio from microphone, transcribe it, and copy to clipboard."""
 
@@ -410,7 +434,7 @@ def main(
             recorder = AudioRecorder(sample_rate, channels)
             audio_file_path = recorder.record()
 
-        transcriber = WhisperTranscriber(model_name=resolved_model, language=resolved_language)
+        transcriber = WhisperTranscriber(model_name=resolved_model, language=resolved_language, device=device)
         audio_duration = transcriber._get_audio_duration(audio_file_path)
         transcription, transcription_time = transcriber.transcribe(audio_file_path, show_progress=True)
 
