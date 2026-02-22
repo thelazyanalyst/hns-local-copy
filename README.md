@@ -68,16 +68,62 @@ With `hns`, you can:
 
 ![use-cases-command-examples](img/hero-command-examples-dark.png)
 
+## CLI Reference
+
+```
+Usage: hns [OPTIONS] COMMAND [ARGS]...
+
+  Record audio from microphone, transcribe it, and copy to clipboard.
+
+Options:
+  --sample-rate INTEGER  Sample rate for audio recording  [default: 16000]
+  --channels INTEGER     Number of audio channels  [default: 1]
+  --list-models          List available Whisper models and exit
+  --model TEXT           Whisper model to use. Can also use HNS_WHISPER_MODEL env var
+  --language TEXT        Force language detection (e.g., en, es, fr). Can also use HNS_LANG env var
+  --last                 Transcribe the last recorded audio file
+  --help                 Show this message and exit.
+
+Commands:
+  config  Manage hns configuration.
+
+Examples:
+  hns                              Record and transcribe using default settings
+  hns --model small                Use the small Whisper model
+  hns --language en                Force English transcription
+  hns --last                       Re-transcribe the last recorded audio
+  hns --model medium --language fr Record and transcribe in French
+  hns config --show                Show current configuration
+  hns config --model small         Set default model to 'small'
+  hns config --save-dir ~/notes    Save recordings to ~/notes
+  hns --list-models                List all available Whisper models
+```
+
+### `hns config` subcommand
+
+```
+Usage: hns config [OPTIONS]
+
+  Manage hns configuration.
+
+Options:
+  --model TEXT     Set the default Whisper model
+  --language TEXT  Set the default language code
+  --save-dir TEXT  Set the directory for saving recordings
+  --show           Show current configuration
+  --help           Show this message and exit.
+```
+
 ## Configuration
 
-hns now supports persistent configuration for your preferred settings. Set defaults once and they'll be reused for all future recordings.
+hns supports persistent configuration so you set your preferences once and they apply to every future recording.
 
 ### View Current Configuration
 ```bash
 hns config --show
 ```
 
-This displays your effective configuration (merged from CLI options, environment variables, config file, and built-in defaults), plus the priority order for resolution.
+Shows your effective configuration, active environment variables, config file contents, and the priority order for how settings are resolved.
 
 ### Set Configuration
 ```bash
@@ -85,12 +131,12 @@ This displays your effective configuration (merged from CLI options, environment
 hns config --model small
 
 # Set default language
-hns config --language es
+hns config --language en
 
 # Set directory for saving recordings
 hns config --save-dir ~/my-recordings
 
-# Combine multiple settings
+# Combine multiple settings at once
 hns config --model base --language en --save-dir ~/hns-recordings
 ```
 
@@ -98,9 +144,24 @@ hns config --model base --language en --save-dir ~/hns-recordings
 Settings are stored in `~/.config/hns/config.toml`:
 ```toml
 model = "small"
-language = "es"
+language = "en"
 save_dir = "/home/user/my-recordings"
 ```
+
+You can edit this file directly. Valid keys are `model`, `language`, and `save_dir`.
+
+### Available Models
+
+| Model | Size | Notes |
+|-------|------|-------|
+| `tiny.en` / `tiny` | ~75MB | Fastest, least accurate |
+| `base.en` / `base` | ~145MB | Default — good balance |
+| `small.en` / `small` | ~465MB | Better accuracy |
+| `medium.en` / `medium` | ~1.5GB | High accuracy |
+| `large-v3` / `turbo` | ~3GB | Best accuracy, slowest |
+| `distil-large-v3` | ~1.5GB | Distilled, fast + accurate |
+
+Run `hns --list-models` to see the full list.
 
 ### Priority Order
 Settings are resolved in this order (highest to lowest priority):
@@ -109,20 +170,37 @@ Settings are resolved in this order (highest to lowest priority):
 3. **Config file** (`~/.config/hns/config.toml`)
 4. **Built-in defaults** (model: `base`, language: auto-detect)
 
+### Environment Variables
+```bash
+export HNS_WHISPER_MODEL=small   # Set default model
+export HNS_LANG=en               # Force language (ISO 639-1 code)
+```
+
 ## Recording Storage
 
-Each recording is automatically saved with:
-- **WAV file**: `{timestamp}_{text_slug}.wav` (e.g., `202401151030_hello_world_this_is_a.wav`)
-- **JSON metadata**: `{timestamp}_{text_slug}.json` containing:
-  - Transcribed text
-  - Model used
-  - Language
-  - Recording timestamp
-  - Audio duration (seconds)
-  - Transcription time (seconds)
-  - Reference to WAV file
+Each recording is automatically saved in its own subfolder named `YYYY_MM_DD_words/`, containing both the audio and a JSON metadata file:
 
-Recordings are saved to the configured directory (default: platform-specific location):
+```
+~/recordings/
+└── 2026_02_22_hello_world_this_is_a/
+    ├── 2026_02_22_hello_world_this_is_a.wav
+    └── 2026_02_22_hello_world_this_is_a.json
+```
+
+The JSON metadata contains:
+```json
+{
+  "text": "Hello world, this is a test.",
+  "model": "base",
+  "language": "en",
+  "recorded_at": "2026-02-22T10:30:00",
+  "audio_duration_seconds": 3.2,
+  "transcription_time_seconds": 1.1,
+  "wav_file": "2026_02_22_hello_world_this_is_a.wav"
+}
+```
+
+### Default Save Locations
 - **Linux**: `~/.local/share/hns/recordings/`
 - **macOS**: `~/Library/Application Support/hns/recordings/`
 - **Windows**: `~/AppData/Roaming/hns/Recordings/`
