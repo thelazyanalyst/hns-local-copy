@@ -15,6 +15,7 @@ import numpy as np
 import pyperclip
 import sounddevice as sd
 from rich.console import Console
+from rich.markup import escape
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -281,7 +282,12 @@ class WhisperTranscriber:
         transcribe_kwargs = {
             "beam_size": 5,
             "vad_filter": True,
-            "vad_parameters": {"min_silence_duration_ms": 500, "speech_pad_ms": 400, "threshold": 0.5},
+            "vad_parameters": {
+                "min_silence_duration_ms": 500,
+                "speech_pad_ms": 400,
+                "threshold": 0.5,
+                "max_speech_duration_s": 29.0,
+            },
         }
 
         if self.language:
@@ -559,6 +565,14 @@ def main(
         raw_save_dir = cfg.get("save_dir")
         save_dir = Path(raw_save_dir).expanduser() if raw_save_dir else get_default_save_dir()
 
+        if resolved_backend == "parakeet":
+            cfg_model = cfg.get("model") if cfg.get("model") in ParakeetTranscriber.VALID_MODELS else None
+            resolved_model = model or os.environ.get("HNS_MODEL") or cfg_model or ParakeetTranscriber.DEFAULT_MODEL
+            transcriber = ParakeetTranscriber(model_name=resolved_model, language=resolved_language, device=device)
+        else:
+            resolved_model = model or os.environ.get("HNS_WHISPER_MODEL") or cfg.get("model") or "base"
+            transcriber = WhisperTranscriber(model_name=resolved_model, language=resolved_language, device=device)
+
         recorded_at = datetime.now()
 
         if last:
@@ -572,15 +586,6 @@ def main(
         else:
             recorder = AudioRecorder(sample_rate, channels)
             audio_file_path = recorder.record()
-
-        if resolved_backend == "parakeet":
-            resolved_model = (
-                model or os.environ.get("HNS_MODEL") or cfg.get("model") or ParakeetTranscriber.DEFAULT_MODEL
-            )
-            transcriber = ParakeetTranscriber(model_name=resolved_model, language=resolved_language, device=device)
-        else:
-            resolved_model = model or os.environ.get("HNS_WHISPER_MODEL") or cfg.get("model") or "base"
-            transcriber = WhisperTranscriber(model_name=resolved_model, language=resolved_language, device=device)
 
         audio_duration = transcriber._get_audio_duration(audio_file_path)
         transcription, transcription_time = transcriber.transcribe(audio_file_path, show_progress=True)
@@ -607,10 +612,10 @@ def main(
         stdout_console.print(transcription)
 
     except (RuntimeError, ValueError) as e:
-        console.print(f"❌ [bold red]{e}[/bold red]")
+        console.print(f"❌ [bold red]{escape(str(e))}[/bold red]")
         sys.exit(1)
     except Exception as e:
-        console.print(f"❌ [bold red]Unexpected error: {e}[/bold red]")
+        console.print(f"❌ [bold red]Unexpected error: {escape(str(e))}[/bold red]")
         sys.exit(1)
 
 
