@@ -23,10 +23,10 @@ dependencies = [
 
 [project.optional-dependencies]
 parakeet = [
-    "onnx-asr[hub]>=0.4.0",
+    "onnx-asr[cpu,hub]>=0.4.0",
 ]
 parakeet-cuda = [
-    "onnx-asr[cuda,hub]>=0.4.0",
+    "onnx-asr[gpu,hub]>=0.4.0",
 ]
 
 [project.urls]
