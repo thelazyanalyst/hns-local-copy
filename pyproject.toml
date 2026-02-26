@@ -14,6 +14,7 @@ dependencies = [
     "click>=8.2.1",
     "faster-whisper>=1.1.1",
     "numpy>=2.2.6",
+    "onnx-asr[cpu,hub]>=0.4.0",
     "pyperclip>=1.9.0",
     "requests>=2.32.4",
     "rich>=13.0.0",
@@ -22,11 +23,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-parakeet = [
-    "onnx-asr[cpu,hub]>=0.4.0",
-]
-parakeet-cuda = [
-    "onnx-asr[gpu,hub]>=0.4.0",
+cuda = [
+    "onnxruntime-gpu>=1.20.0",
 ]
 
 [project.urls]
@@ -48,6 +46,8 @@ exclude = [
 
 [dependency-groups]
 dev = [
+    "pytest>=8.0.0",
+    "pytest-mock>=3.14.0",
     "ruff>=0.12.1",
 ]
 

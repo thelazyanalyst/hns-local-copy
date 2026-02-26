@@ -409,13 +409,6 @@ class ParakeetTranscriber:
     def _load_model(self):
         try:
             import onnx_asr
-        except ImportError:
-            raise RuntimeError(
-                "Parakeet backend requires onnx-asr. Install with:\n"
-                "  pip install 'hns[parakeet-cuda]'  (GPU)\n"
-                "  pip install 'hns[parakeet]'        (CPU)"
-            )
-        try:
             providers = (
                 ["CUDAExecutionProvider", "CPUExecutionProvider"] if self.device == "cuda" else ["CPUExecutionProvider"]
             )
@@ -641,7 +634,11 @@ def _show_config():
 
     resolved_backend = env_backend or cfg.get("backend") or "whisper"
     default_model = ParakeetTranscriber.DEFAULT_MODEL if resolved_backend == "parakeet" else "base"
-    resolved_model = env_model or cfg.get("model") or default_model
+    if resolved_backend == "parakeet":
+        cfg_model = cfg.get("model") if cfg.get("model") in ParakeetTranscriber.VALID_MODELS else None
+        resolved_model = env_model or cfg_model or default_model
+    else:
+        resolved_model = env_model or cfg.get("model") or default_model
     resolved_language = env_lang or cfg.get("language") or None
     raw_save_dir = cfg.get("save_dir")
     resolved_save_dir = Path(raw_save_dir).expanduser() if raw_save_dir else get_default_save_dir()
